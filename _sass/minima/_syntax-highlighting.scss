@@ -1,0 +1,55 @@
+/**
+ * Syntax highlighting styles
+ - reference: https://pygments-doc.readthedocs.io/en/latest/_modules/pygments/token.html
+ - rogue: https://github.com/rouge-ruby/rouge/blob/master/lib/rouge/lexers/swift.rb
+ */
+$background: #23252B;
+$plain-text: rgba(#FFFFFF, 85%);
+$comments: #6C7986;
+$documentation: $comments;
+$string: #FC6A5D;
+$number: #D0BF69;
+$keyword: #FC5FA3;
+$preprocessor: #FD8F3F;
+$url: #5482FF;
+$type-declaration: #5DD8FF;
+$other-declaration: #41A1C0;
+$project-type: #9EF1DD;
+$project-member: #67B7A4;
+$apple-type: #D0A8FF;
+$apple-member: #A167E6;
+
+.highlight {
+  background: $background;
+  @extend %vertical-rhythm;
+
+  .highlighter-rouge & {
+    background: $background;
+  }
+
+  color: $plain-text;
+  .c, .cm, .c1, .cs // Comment
+    { color: $comments; font-style: italic }
+  .err // Error
+    { color: $string; }
+  .k, .kd, .kc // Keyword
+    { color: $keyword; font-weight: bold }
+  .o, .ow // Operator
+    { color: $plain-text }
+  .cp // Comment.Preproc
+    { color: $preprocessor }
+  .kt // Keyword.Type
+    { color: $project-type }
+  .m, .mf, .mh, .mi, .mo, .il // Literal.Numbers  
+    { color: $number }
+  .s // Literal.String
+    { color: $string }
+  .nf // Name.Function
+    { color: $apple-member }
+  .w // Text.Whitespace
+    { color: $plain-text }
+  .nv // Name.Variable
+    { color: $plain-text }
+  .p // Punctuation
+    { color: $plain-text }
+}
