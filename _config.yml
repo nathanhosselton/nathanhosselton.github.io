@@ -22,7 +22,7 @@ title: swift machinations
 author: Nathan Hosselton
 email: nathanhosselton@gmail.com
 description: >- # this means to ignore newlines until "baseurl:"
-  a small thing that you have made for yourself is almost always better
+  a small thing you have made for yourself is almost always better
   than a large thing made for everyone else
 baseurl: "" # the subpath of your site, e.g. /blog
 url: "" # the base hostname & protocol for your site, e.g. http://example.com

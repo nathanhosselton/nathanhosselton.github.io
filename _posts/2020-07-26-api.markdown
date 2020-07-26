@@ -1,0 +1,405 @@
+---
+layout: post
+title:  "Self-sufficient API types"
+description: "Networking is a solved problem. Why bother doing it yourself?"
+date:   2020-07-26
+---
+Networking, and interfacing with a restful backend specifically, is a solved problem. It rarely changes enough to require custom implementation, which is why the use of libraries that do the busy work is common practice. They're tested, and their underlying mechanisms and code don't change (now that Swift is stable). Why bother doing it yourself?
+
+I already have a list of 15+ topics I'd like to eventually write about, and the answer to this question is the general theme of them all. For almost any problem you need solved, there will be code publicly and freely available that already solves it. I reference plenty of these solutions; I've relied on some of them even. But when I have the option, I rewrite them. Not due to any sort of licensing or ownership concern.
+
+**I write my own code because I enjoy it, and because it gives me confidence in the code and subsequently in myself.**
+
+If I can reimplement it, I know I understand it. And once I understand it, I can tailor it to my specific use cases. This then has a number of positive effects (which I'll discuss later). So I stopped depending on networking libraries and started writing the code myself. Once I did, I realized it's not that arduous, even while ensuring safety. Not as safe as the big libraries, but that's not the point.
+
+I chose this topic out of the list of others to write on first because I think it's the hardest case to make, but also the best one for it. Pull back the curtain just a little bit and you start to see that networking isn't hard (thanks to Foundation), and that __doing it yourself can be immensely fulfilling__.
+
+# API.swift
+
+Foundation's networking APIs are robust, but one of the worst parts of interfacing with it directly are the completion handlers of the `NSURLSession` task-returning methods. They're still stuck in the thing-or-nil pattern, and there are three \*things\* to check. Their documentation makes some guarantees about them, but they'll still quickly wreck the clarity of your code if you let them.
+
+This is easily avoided with a simple extension method. If you don't need the task object either, you can abstract that away here as well. The new method is named `dataRequest` to evoke this distinction:
+
+{% highlight swift %}
+private extension URLSession {
+  /// Calls `dataTask(with:completion:)`, immediately `resume`ing the task and wrapping the result in
+  /// a `Swift.Result` for convenience.
+  ///
+  /// This function contains no logic aside from the requisite nil checks. Callers are still expected to perform any
+  /// validation relevant to their contexts, such as on the resulting HTTP status code.
+  ///
+  /// - Note: The completion is **not** dispatched to the main thread.
+  func dataRequest(with request: URLRequest, completion: @escaping (Swift.Result<(Data, URLResponse), Swift.Error>) -> Void) {
+    URLSession.shared.dataTask(with: request) { (d, r, e) in
+      switch (d, r, e) {
+      case (.some(let data), .some(let response), _):
+        completion(.success((data, response)))
+      case (_, _, .some(let error)):
+        completion(.failure(error))
+      default:
+        assertionFailure("\(request) forgot about dre")
+      }
+    }
+
+    .resume()
+  }
+}
+{% endhighlight %}
+
+Next step is to define the errors that can occur while processing a request. These typically fall into three main categories:
+
+{% highlight swift %}
+/// The unified interface for performing all HTTP requests to the backend.
+enum API {
+  /// A type representing the errors that could occur as part of this API.
+  enum Error: Swift.Error {
+    /// We received an http 200 response but the backend encountered a problem,
+    /// denoted by the provided status code.
+    case backendStatusCode(BackendStatusCode)
+    /// The http request failed with a status code indicating connectivity issues.
+    case connectivity
+    /// Indicates a permanent developer or service error.
+    case `internal`(Swift.Error)
+  }
+}
+{% endhighlight %}
+
+`BackendStatusCode` in this case is a stand-in for the type that you'll presumably define elsewhere for representing errors specific to your backend that are communicated to the iOS client in their response bodies. These errors are notably not defined in this interface because this would betray the categorization, which aids in pathing for error handling at call sites. Generally, the specific backend errors will be events that you'll want to know about and directly communicate to the user, whereas the other two are likely to be at least partially handled before reaching the call site.
+
+# Endpoints
+
+With the groundwork laid, the core work can begin. Requests have numerous components that must be defined before they can be executed. It's easiest to coalesce them into a consistent interface for providers to adopt:
+
+{% highlight swift %}
+enum API {
+  /// An interface for subsections of the `API` to provide the necessary 
+  /// components for executing its HTTP requests.
+  ///
+  /// The adopting type is expected to be an enum whose cases each represent
+  /// a distinct endpoint on the backend.
+  protocol Endpoint {
+    /// The endpoint's path component, including relevant versioning. Should
+    /// begin with `/`.
+    var path: String { get }
+    /// The HTTP method used to execute this endpoint's request.
+    var method: API.HttpMethod { get }
+    /// Any query parameters to be included with the request. May be nil or empty.
+    var queryItems: [URLQueryItem]? { get }
+    /// The encoded object data to be provided in the HTTP body of the endpoint's
+    /// request. May be nil.
+    var httpBody: Data? { get }
+    /// Indicates whether this endpoint's request requires authorization.
+    var requiresAuth: Bool { get }
+  }
+}
+{% endhighlight %}
+
+Another frustrating aspect of working with Foundation is that `URLRequest` http methods are still string-ly typed. The `API.HttpMethod` type included above is defined to fill that gap:
+
+{% highlight swift %}
+enum API {
+  ...
+  /// Represents the available HTTP methods on this API.
+  enum HttpMethod: String {
+    case get = "GET"
+    case put = "PUT"
+    case post = "POST"
+    case delete = "DELETE"
+  }
+}
+{% endhighlight %}
+
+From this interface alone, a fully configured `URLRequest` can now be built, filling in backend specific information as needed:
+
+{% highlight swift %}
+private extension API.Endpoint {
+  /// A fully constructed `URLRequest` object from the endpoint's provided
+  /// components, fit for our `API`.
+  ///
+  /// The returned object is the foundation of all requests executed by `API`.
+  /// Adopters of `Endpoint` declare their interface, which is used here to 
+  /// construct the request when called.
+  var urlRequest: URLRequest {
+    var comps = URLComponents()
+    comps.scheme = "https"
+    #if DEVELOPMENT
+    comps.host = "your.dev.domain"
+    #else
+    comps.host = "your.prod.domain"
+    #endif
+    comps.port = 9999
+    comps.path = "/api" + path
+    comps.queryItems = queryItems
+
+    guard let url = comps.url else {
+      // Developer error
+      assertionFailure("Failed to generate a valid URL with query items: \(String(describing: queryItems))")
+      return URLRequest(url: URL(string: "https://apple.com")!)
+    }
+
+    var rq = URLRequest(url: url)
+    rq.httpMethod = method.rawValue
+    rq.httpBody = httpBody
+    rq.addValue("application/json", forHTTPHeaderField: "Content-Type")
+
+    if requiresAuth {
+      // Authorize your request based on your configuration
+    }
+
+    return rq
+  }
+}
+{% endhighlight %}
+
+Now in, say, a Feed.swift file, endpoints related to the central feed of the app can be declared:
+
+{% highlight swift %}
+extension API {
+/// The interface for the Feed endpoints and their requests.
+  enum Feed: Endpoint {
+    /// Provides the latest events in the user's feed.
+    case events
+    /// Adds the new event to the user's timeline.
+    case createEvent(Event)
+    /// Likes the event on behalf of the user.
+    case likeEvent(Event)
+  }
+}
+{% endhighlight %}
+
+Underneath, we provide the fields required by `Endpoint` for each of the endpoints we've declared:
+
+{% highlight swift %}
+enum Feed: Endpoint {
+  ...
+  //MARK: - Components
+  
+  var path: String {
+    switch self {
+    case events:
+      return "/feed/events"
+    case createEvent:
+      return "/user/event"
+    case likeEvent:
+      return "/user/like"
+    }
+  }
+
+  var method: API.HttpMethod {
+    switch self {
+    case events:
+      return .get
+    case createEvent:
+      return .post
+    case likeEvent:
+      return .post
+    }
+  }
+
+  var queryItems: [URLQueryItem]? {
+    switch self {
+    case events:
+      return .none
+    case createEvent:
+      return .none
+    case likeEvent(let event):
+      return [URLQueryItem(name: "id", value: event.id)]
+    }
+  }
+
+  var httpBody: Data? {
+    switch self {
+    case events:
+      return .none
+    case createEvent(let event):
+      return try! JSONEncoder().encode(event)
+    case likeEvent:
+      return .none
+    }
+  }
+
+  var requiresAuth: Bool {
+    return true
+  }
+}
+{% endhighlight %}
+
+Notably, there are some endpoints on a user mixed in with this Feed type. This is personal preference, but since these user endpoints relate directly to the app's Feed, I might put them here instead of on a User enum of endpoints.
+
+More importantly though, there is a concerning issue of the use of `try!` in the encoding of the `httpBody` for the `createEvent` endpoint. We should wrap this in a do-catch statement and handle the encoding error should one occur. But then, what if we need to perform special encoder configuration specific to our API/backend? We would need to include that here as well, and then duplicate it for each endpoint that needs to JSON encode its body.
+
+> Ideally, we would pass the object up to the caller of `httpBody` by defining it as `Encodable` instead of `Data?`. But unfortunately this is currently impossible in Swift; with the concrete type information lost, the receiver cannot execute the call to `encode`, and converting this property to a generic function is a rabbit hole not worth falling through (I tried). A [type-erased AnyCodable object][AnyCodable-FlightSchool] could fill this gap, but that's a lot of extra effort right now.
+
+Instead, define a new static function on API to handle JSON encoding on behalf of its endpoints. Personally, I would include this along with the prior `protocol Endpoint` definition in something like an API+construction.swift file to keep the core API file clean:
+
+{% highlight swift %}
+extension API {
+  /// Performs `Encodable` object encoding appropriate for this API on behalf
+  /// of the requestor.
+  ///
+  /// This method consumes decoding failures to avoid propagating the `try`
+  /// or optional value to callers, as failures here are a developer error.
+  ///
+  /// - parameter object: The `Encodable` object to be encoded as JSON.
+  /// - Returns: The `Data` result of the encoding operation.
+  static func encodeJSON<T>(_ object: T) -> Data where T: Encodable {
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    //etc…
+
+    do {
+      return try encoder.encode(object)
+    } catch {
+      // Developer error
+      assertionFailure(error.localizedDescription)
+      return Data()
+    }
+  }
+}
+{% endhighlight %}
+
+Now back in the endpoint we can do:
+
+{% highlight swift %}
+var httpBody: Data? {
+  switch self {
+  ...
+  case createEvent(let event):
+    return API.encodeJSON(event)
+  ...
+  }
+}
+{% endhighlight %}
+
+> But what if there are object-specific JSONEncoder configurations required? I use a `CoderProviding` protocol for this purpose, which I'll detail in a future post.
+
+Initially, providing a public method for encoding objects felt like a betrayal of API encapsulation. After all, I wouldn't expect to call a method for performing _decoding_; the API type should handle that for me!
+
+But when I thought about it more, the two are not the same, and it even makes a certain amount of sense to make encoding a public operation, even while decoding is entirely hidden from view. Swift's generics implementation, whether intentionally or otherwise, supports this notion. In a perfect world, one could make the method private to the API type so that only the Endpoints could use it, but this isn't possible in Swift's current access control capabilities.
+
+# Requests
+
+To start executing requests to the endpoints, there needs to be a method for accepting them:
+
+{% highlight swift %}
+enum API {
+  ...
+  /// Executes the endpoint request, handling data decoding and any 
+  /// application-level errors.
+  ///
+  /// - Parameters:
+  ///   - endpoint: The endpoint to be requested.
+  ///   - completion: The callback to be executed when this request completes.
+  ///   - result: The result of the request, provided in the `completion`, 
+  ///     containing either the requested data decoded into its Swift 
+  ///     representation, or the error.
+  static func request<T: Decodable>(_ endpoint: Endpoint, completion: @escaping (_ result: Swift.Result<T, API.Error>) -> Void) {
+    /// Executes the completion onto the main queue.
+    let complete = { (result: Swift.Result<T, API.Error>) in DispatchQueue.main.async { completion(result) } }
+    
+    URLSession.shared.dataRequest(with: endpoint.urlRequest) { result in
+      switch result {
+      // - Success
+      case .success((let data, let httpResp as HTTPURLResponse)) where (200...299).contains(httpResp.statusCode):
+        // Attempt to decode the data, handling decoding failures
+        ...
+        complete(.success(decodedData))
+      // - HTTP Failure
+      case .success((_, let response)):
+        switch response {
+        case let httpResp as HTTPURLResponse where [408, 502, 503, 504].contains(httpResp.statusCode):
+          complete(.failure(.connectivity))
+        // Handle specific status codes for your backend
+        ...
+        }
+      // - Internal Request Failure
+      case .failure(let error):
+        complete(.failure(.internal(error)))
+      }
+    }
+  }
+}
+{% endhighlight %}
+
+This is our standard function for performing all HTTP requests using our `Endpoint`s. It executes them using the `dataRequest` method we defined earlier. It handles decoding and error parsing as well as dispatching to the main thread on behalf of the requestor, leaving them to only worry about what type to decode the data into, and what high level `API.Error`s to handle.
+
+The method is generic on the `Success` type of the completion's `Result` parameter. This means that callers must ensure their completions are explicit, which isn't always a nice thing to demand inside of, say, a view controller. To ease this, I like to define a static function for each of my endpoints:
+
+{% highlight swift %}
+enum Feed: Endpoint {
+  ...
+  //MARK: - Requests
+  
+  /// GET the latest events to display in the current user's feed.
+  static func getEvents(completion: @escaping (Swift.Result<[Event], API.Error>) -> Void) {
+    API.request(events, completion: completion)
+  }
+  
+  /// POST the provided event to the user's feed.
+  static func postEvent(_ event: Event, completion: @escaping (Swift.Result<Void, API.Error>) -> Void) {
+    API.request(createEvent(event), completion: completion)
+  }
+  
+  //MARK: - Components
+  ...
+}
+{% endhighlight %}
+
+This looks like boilerplate, because it kind of is. But I think it's worthwhile boilerplate, because it cleans up call sites while declaring to consumers the functional interface of an `Endpoint`, which otherwise exists a list of static values. It can also be more than boilerplate when a request should perform some specific logic (such as input validation or result sorting) that callers shouldn't have to manage.
+
+A downside to this pattern however is that these methods and the `Endpoint` cases they abstract are both static on the type which creates competition during autocomplete. I attempt to alleviate this by prefixing all of the functions with their HTTP method. This disambiguates the endpoint definitions from their functions while also establishing an expectation with the consumers that they can always begin typing the HTTP method and get the autocompleted list of the available functions for endpoints that use those methods.
+
+# Usage
+
+We now have all of the foundation laid, we can begin executing our backend-specific API requests, which looks like this:
+
+{% highlight swift %}
+@objc private func onRefreshPulled() {
+  API.Feed.getEvents { result in
+    switch result {
+    case .success(let events):
+      self.feed = events
+      self.feedTableView.reloadData()
+    case .failure(let error):
+      self.displayAlert(for: error)
+    }
+  }
+}
+
+@IBAction private func onPostTapped(_ sender: UIButton) {
+  API.Feed.postEvent(self.contructedEvent) { result in
+    switch result {
+      case .success:
+        self.onRefreshPulled()
+        // Cleanup state
+      case .failure(let error):
+        self.displayAlert(for: error)
+    }    
+  }
+}
+
+private func displayAlert(for error: API.Error) {
+  switch error {
+    case .connectivity:
+      // Show standard alert
+    case .backendStatusCode(let code):
+      // Handle relevant backend codes
+    case .internal(let error):
+      // Log event and tell the user to try again or contact us
+  }
+}
+{% endhighlight %}
+
+This example is fairly contrived, but it's just for showing the fruits of all of our labor: a very clean interface for executing our requests and switching on their errors. How and where you perform these actions is up to your app's design; the API type doesn't care. And likewise, you don't have care about how the API type gives you what you want. They're decoupled.
+
+Best of all, you get to own both sides of that fence, not just one of them. And it didn't even require that much effort. From here, you can continue trivially defining new `Endpoint` types for each subsection of your backend's API. We haven't implemented any tests yet, but that's not hard to do from this point either.
+
+There's also lots of room for refinements inside of this structure. Custom decoders, specific error handling (and short circuiting), standard response wrapper types, completion adapters, etc. I use custom interfaces for models that define their decoding behavior, and the logic for it is entirely encapsulated in my API type. It's not a chore to implement these things when you control the whole stack.
+
+In fact, **it's downright fun**.
+
+# Next up
+
+I have no shortage of fun things I could delve into for the next post and I haven't decided what it will be yet. Custom view bindings, UI presentation abstractions, view controller design, finessing this API type, or something else. More than likely, I'll start writing at least 3 different posts before I commit to one. 
+
+[AnyCodable-FlightSchool]: https://github.com/Flight-School/AnyCodable
