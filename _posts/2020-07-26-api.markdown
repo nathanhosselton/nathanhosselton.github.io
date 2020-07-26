@@ -155,7 +155,7 @@ Now in, say, a Feed.swift file, endpoints related to the central feed of the app
 
 {% highlight swift %}
 extension API {
-/// The interface for the Feed endpoints and their requests.
+  /// The interface for the Feed endpoints and their requests.
   enum Feed: Endpoint {
     /// Provides the latest events in the user's feed.
     case events
@@ -323,11 +323,15 @@ enum API {
 
 This is our standard function for performing all HTTP requests using our `Endpoint`s. It executes them using the `dataRequest` method we defined earlier. It handles decoding and error parsing as well as dispatching to the main thread on behalf of the requestor, leaving them to only worry about what type to decode the data into, and what high level `API.Error`s to handle.
 
-The method is generic on the `Success` type of the completion's `Result` parameter. This means that callers must ensure their completions are explicit, which isn't always a nice thing to demand inside of, say, a view controller. To ease this, I like to define a static function for each of my endpoints:
+The function is generic on the `Success` type of the completion's `Result` parameter. This means that callers must ensure their completions are explicit, which isn't always a nice thing to demand inside of, say, a view controller. To ease this, I like to define a static function for each of my endpoints:
 
 {% highlight swift %}
 enum Feed: Endpoint {
-  ...
+  /// Provides the latest events in the user's feed.
+  case events
+  /// Adds the new event to the user's timeline.
+  case createEvent(Event)
+
   //MARK: - Requests
   
   /// GET the latest events to display in the current user's feed.
@@ -354,6 +358,8 @@ A downside to this pattern however is that these methods and the `Endpoint` case
 We now have all of the foundation laid, we can begin executing our backend-specific API requests, which looks like this:
 
 {% highlight swift %}
+// In FeedViewController…
+
 @objc private func onRefreshPulled() {
   API.Feed.getEvents { result in
     switch result {
@@ -369,23 +375,23 @@ We now have all of the foundation laid, we can begin executing our backend-speci
 @IBAction private func onPostTapped(_ sender: UIButton) {
   API.Feed.postEvent(self.contructedEvent) { result in
     switch result {
-      case .success:
-        self.onRefreshPulled()
-        // Cleanup state
-      case .failure(let error):
-        self.displayAlert(for: error)
+    case .success:
+      self.onRefreshPulled()
+      // Cleanup state
+    case .failure(let error):
+      self.displayAlert(for: error)
     }    
   }
 }
 
 private func displayAlert(for error: API.Error) {
   switch error {
-    case .connectivity:
-      // Show standard alert
-    case .backendStatusCode(let code):
-      // Handle relevant backend codes
-    case .internal(let error):
-      // Log event and tell the user to try again or contact us
+  case .connectivity:
+    // Show standard alert
+  case .backendStatusCode(let code):
+    // Handle relevant backend codes
+  case .internal(let error):
+    // Log event and tell the user to try again or contact us
   }
 }
 {% endhighlight %}
