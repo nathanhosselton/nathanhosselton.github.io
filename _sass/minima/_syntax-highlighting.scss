@@ -53,3 +53,15 @@ $apple-member: #A167E6;
   .p // Punctuation
     { color: $plain-text }
 }
+
+// Swift-specific joins
+// source: https://gist.github.com/kaybutter/e9a451fdfda10c25a2af
+.highlight .language-swift {
+  .kd+.nf, // Function Name trailing Declaration
+  .kd+.kt // Type names trailing Declarations
+    { color: inherit; }
+  .o+.n // Names trailing Operators (so: Properties, mostly)
+    { color: $apple-member }
+  .nv+.o+.n // Variable Name and Names joined by Operators
+    { color: inherit; }
+}
