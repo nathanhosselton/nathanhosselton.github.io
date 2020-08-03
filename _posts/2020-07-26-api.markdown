@@ -349,7 +349,7 @@ enum Feed: Endpoint {
 }
 {% endhighlight %}
 
-This looks like boilerplate, because it kind of is. But I think it's worthwhile boilerplate, because it cleans up call sites while declaring to consumers the functional interface of an `Endpoint`, which otherwise exists a list of static values. It can also be more than boilerplate when a request should perform some specific logic (such as input validation or result sorting) that callers shouldn't have to manage.
+This looks like boilerplate, because it kind of is. But I think it's worthwhile boilerplate, because it cleans up call sites while declaring to consumers the functional interface of an `Endpoint`, which otherwise exists as a list of static values. It can also be more than boilerplate when a request should perform some specific logic (such as input validation or result sorting) that callers shouldn't have to manage.
 
 A downside to this pattern however is that these methods and the `Endpoint` cases they abstract are both static on the type which creates competition during autocomplete. I attempt to alleviate this by prefixing all of the functions with their HTTP method. This disambiguates the endpoint definitions from their functions while also establishing an expectation with the consumers that they can always begin typing the HTTP method and get the autocompleted list of the available functions for endpoints that use those methods.
 
