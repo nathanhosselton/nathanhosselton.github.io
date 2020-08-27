@@ -71,26 +71,24 @@ enum API {
 With the groundwork laid, the core work can begin. Requests have numerous components that must be defined before they can be executed. It's easiest to coalesce them into a consistent interface for providers to adopt:
 
 {% highlight swift %}
-enum API {
-  /// An interface for subsections of the `API` to provide the necessary 
-  /// components for executing its HTTP requests.
-  ///
-  /// The adopting type is expected to be an enum whose cases each represent
-  /// a distinct endpoint on the backend.
-  protocol Endpoint {
-    /// The endpoint's path component, including relevant versioning. Should
-    /// begin with `/`.
-    var path: String { get }
-    /// The HTTP method used to execute this endpoint's request.
-    var method: API.HttpMethod { get }
-    /// Any query parameters to be included with the request. May be nil or empty.
-    var queryItems: [URLQueryItem]? { get }
-    /// The encoded object data to be provided in the HTTP body of the endpoint's
-    /// request. May be nil.
-    var httpBody: Data? { get }
-    /// Indicates whether this endpoint's request requires authorization.
-    var requiresAuth: Bool { get }
-  }
+/// An interface for subsections of the `API` to provide the necessary 
+/// components for executing its HTTP requests.
+///
+/// The adopting type is expected to be an enum whose cases each represent
+/// a distinct endpoint on the backend.
+protocol Endpoint {
+  /// The endpoint's path component, including relevant versioning. Should
+  /// begin with `/`.
+  var path: String { get }
+  /// The HTTP method used to execute this endpoint's request.
+  var method: API.HttpMethod { get }
+  /// Any query parameters to be included with the request. May be nil or empty.
+  var queryItems: [URLQueryItem]? { get }
+  /// The encoded object data to be provided in the HTTP body of the endpoint's
+  /// request. May be nil.
+  var httpBody: Data? { get }
+  /// Indicates whether this endpoint's request requires authorization.
+  var requiresAuth: Bool { get }
 }
 {% endhighlight %}
 
@@ -112,7 +110,7 @@ enum API {
 From this interface alone, a fully configured `URLRequest` can now be built, filling in backend specific information as needed:
 
 {% highlight swift %}
-private extension API.Endpoint {
+private extension Endpoint {
   /// A fully constructed `URLRequest` object from the endpoint's provided
   /// components, fit for our `API`.
   ///

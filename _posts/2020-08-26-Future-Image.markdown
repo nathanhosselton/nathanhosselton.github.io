@@ -257,7 +257,7 @@ struct StoreItem: Decodable {
   ...
 
   lazy var primaryImageFuture: FutureImage = { 
-    FutureImage(at: primaryImageUrl, cachePolicy: .toDisk(path: "unique/path/imageId.ext"))
+    FutureImage(at: primaryImageUrl, cachePolicy: .toDisk(path: URL.appTmp(appending: "unique/path/imageId.ext")))
   }()
   
   lazy var anotherImageFuture: FutureImage = {
