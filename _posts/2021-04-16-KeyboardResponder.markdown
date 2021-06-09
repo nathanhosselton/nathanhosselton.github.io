@@ -22,6 +22,8 @@ Apple doesn't help you here at all, aside from providing a suite of (confusing) 
 
 I'm exhausted already.
 
+> **Update:** Apple is providing a new [UIKeyboardLayoutGuide](https://developer.apple.com/videos/play/wwdc2021/10259/) that looks amazing and solves every issue I describe in this post (provided you are able to exclusively target iOS 15).
+
 # Writing a cleaner keyboard API
 
 Abstracting keyboard responses is almost a fool's errand out of the gate. The very nature of the problem resides in the endless ways that you'll find yourself needing to work around it. Every time that I have thought I've finally seen every permutation of keyboard layout, another appears and I'm back to square one. So how can any abstraction hold water?
